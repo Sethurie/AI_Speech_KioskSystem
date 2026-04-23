@@ -17,9 +17,9 @@ export const menuData = {
     { id: 3, name: "바닐라 라떼", price: 5500, type: 'BOTH', img: '/images/vanillalatte.png' },
     { id: 4, name: "카라멜 마끼아또", price: 5900, type: 'BOTH', img: '/images/caramel.png' },
     { id: 5, name: "콜드 브루", price: 4900, type: 'ICE', img: '/images/coldbrew.png' },
-    { id: 6, name: "에스프레소", price: 3000, type: 'HOT', img: '/images/espreso.png' },
-    { id: 7, name: "카푸치노", price: 5000, type: 'HOT', img: '/images/cafucino.png' },
-    { id: 8, name: "돌체 라떼", price: 5900, type: 'ICE', img: '/images/dolcelatte.png' }
+    { id: 6, name: "에스프레소", price: 3000, type: 'HOT', img: '/images/espreso.png' }, 
+    { id: 7, name: "카푸치노", price: 5000, type: 'HOT', img: '/images/cafucino.png' }, 
+    { id: 8, name: "돌체 라떼", price: 5900, type: 'ICE', img: '/images/dolcelatte.png' } 
   ],
   noncoffee: [
     { id: 9, name: "시그니처 초콜릿", price: 5700, type: 'BOTH', img: '/images/signiturechoco.png' },
@@ -44,7 +44,7 @@ export const menuData = {
     { id: 20, name: "블루베리 마카롱", price: 3000, type: 'NONE', img: '/images/blueberrymacaron.png' },
     { id: 21, name: "버터 크루아상", price: 4900, type: 'NONE', img: '/images/buttercroissant.png' },
     { id: 22, name: "어니언 베이글", price: 3500, type: 'NONE', img: '/images/unionbagel.png' },
-    { id: 23, name: "에그 샌드위치", price: 5900, type: 'NONE', img: '/images/eggsandwich.png' },
+    { id: 23, name: "에그 샌드위치", price: 5900, type: 'NONE', img: '/images/eggsandwich.png' }, 
     { id: 24, name: "생크림 카스텔라", price: 4500, type: 'NONE', img: '/images/castella.png' },
     { id: 29, name: "두바이 쫀득 쿠키", price: 5000, type: 'NONE', img: '/images/dubai.png' }
   ],
@@ -59,9 +59,9 @@ export const menuData = {
 };
 
 export const numWords = [
-  { word: '열', num: 10 }, { word: '아홉', num: 9 }, { word: '여덟', num: 8 }, { word: '일곱', num: 7 }, { word: '여섯', num: 6 },
-  { word: '다섯', num: 5 }, { word: '네', num: 4 }, { word: '넷', num: 4 }, { word: '세', num: 3 }, { word: '셋', num: 3 },
-  { word: '두', num: 2 }, { word: '둘', num: 2 }, { word: '한', num: 1 }, { word: '하나', num: 1 }, { word: '1', num: 1 },
+  { word: '열', num: 10 }, { word: '아홉', num: 9 }, { word: '여덟', num: 8 }, { word: '일곱', num: 7 }, { word: '여섯', num: 6 }, 
+  { word: '다섯', num: 5 }, { word: '네', num: 4 }, { word: '넷', num: 4 }, { word: '세', num: 3 }, { word: '셋', num: 3 }, 
+  { word: '두', num: 2 }, { word: '둘', num: 2 }, { word: '한', num: 1 }, { word: '하나', num: 1 }, { word: '1', num: 1 }, 
   { word: '2', num: 2 }, { word: '3', num: 3 }, { word: '4', num: 4 }
 ];
 

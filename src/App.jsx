@@ -137,93 +137,59 @@ const handleMenuClick = (item) => {
   }
 };
 
-// ⭐️ [신규] 완전히 랜덤화되고 똑똑해진 AI 추천 로직
-const fetchAiRecommendation = (text) => {
+// ⭐️ [신규] 완전히 랜덤화되고 똑똑해진 AI 추천 로직 (백엔드 Gemini API 연동)
+const fetchAiRecommendation = async (text) => {
   setIsAiThinking(true);
   setAiRecommendations([]);
 
-  setTimeout(() => {
-    const allMenus = Object.values(menuData).flat().filter(Boolean);
-    let reply = "";
-    let recommendedIds = [];
-
-    // 1. 달달한 메뉴 (초코, 바닐라, 마카롱, 케이크 등)
-    if (text.includes("달달") || text.includes("단거") || text.includes("스트레스") || text.includes("우울") || text.includes("초코") || text.includes("단 거")) {
-      const sweetReplies = [
-        "스트레스 받을 땐 역시 달콤한 게 최고죠! 기분을 확 끌어올려 줄 메뉴들을 골라봤어요.",
-        "당 충전이 필요하시군요! 말말카페의 자랑, 달달하고 맛있는 메뉴들을 추천해 드립니다.",
-        "기분 전환에 딱 좋은 달콤한 디저트와 음료 조합은 어떠신가요?"
-      ];
-      reply = sweetReplies[Math.floor(Math.random() * sweetReplies.length)];
-
-      // 당 충전 메뉴 풀에서 랜덤 3개
-      const sweetPool = [3, 4, 8, 9, 11, 12, 17, 18, 20, 102];
-      recommendedIds = sweetPool.sort(() => 0.5 - Math.random()).slice(0, 3);
-
-      // 2. 든든한 메뉴 (아침, 빵, 세트 등)
-    } else if (text.includes("아침") || text.includes("배고파") || text.includes("식사") || text.includes("세트") || text.includes("빵") || text.includes("출출")) {
-      const mealReplies = [
-        "든든하게 배를 채울 수 있는 맛있는 메뉴들을 준비했습니다!",
-        "출출하실 때 딱 좋은 베이커리와 세트 메뉴를 추천해 드려요.",
-        "커피와 함께 즐기기 좋은 든든한 디저트 조합입니다. 훌륭한 한 끼가 될 거예요."
-      ];
-      reply = mealReplies[Math.floor(Math.random() * mealReplies.length)];
-
-      // 베이커리/세트 메뉴 풀에서 랜덤 3개
-      const mealPool = [19, 21, 22, 23, 24, 101];
-      recommendedIds = mealPool.sort(() => 0.5 - Math.random()).slice(0, 3);
-
-      // 3. 상큼/시원한 메뉴 (에이드, 과일, 아이스티 등)
-    } else if (text.includes("상큼") || text.includes("시원") || text.includes("과일") || text.includes("더워") || text.includes("갈증") || text.includes("에이드")) {
-      const freshReplies = [
-        "갈증을 날려버릴 시원하고 상큼한 메뉴들입니다!",
-        "톡 쏘는 청량감! 생과일의 상큼함을 가득 담은 메뉴를 추천해요.",
-        "더운 날씨에 딱 어울리는 시원한 에이드와 아이스티 어떠신가요?"
-      ];
-      reply = freshReplies[Math.floor(Math.random() * freshReplies.length)];
-
-      // 에이드/티 메뉴 풀에서 랜덤 3~4개
-      const freshPool = [13, 14, 15, 16, 25, 26, 203];
-      recommendedIds = freshPool.sort(() => 0.5 - Math.random()).slice(0, 3);
-
-      // 4. 카페인/잠 깨는 메뉴 (커피, 콜드브루 등)
-    } else if (text.includes("잠") || text.includes("피곤") || text.includes("카페인") || text.includes("커피") || text.includes("밤샘") || text.includes("졸려")) {
-      const caffeineReplies = [
-        "피곤하시군요! 잠을 확 깨워줄 진한 커피 메뉴들을 추천해 드릴게요.",
-        "카페인이 필요하실 때 가장 많이 찾는 말말카페의 베스트 커피입니다.",
-        "진한 에스프레소의 향기로 에너지를 100% 충전해 보세요!"
-      ];
-      reply = caffeineReplies[Math.floor(Math.random() * caffeineReplies.length)];
-
-      // 고카페인 메뉴 풀에서 랜덤 3개
-      const caffeinePool = [1, 5, 6, 201, 202];
-      recommendedIds = caffeinePool.sort(() => 0.5 - Math.random()).slice(0, 3);
-
-      // 5. 그 외 (랜덤 추천)
-    } else {
-      const defaultReplies = [
-        "어떤 메뉴를 고를지 고민되시나요? 저희 매장에서 가장 사랑받는 메뉴들을 랜덤으로 섞어봤어요!",
-        "오늘 같은 날씨에 딱 어울리는 말말카페의 베스트 조합입니다.",
-        "AI 말말이가 고객님을 위해 무작위로 맛있는 메뉴를 골라봤습니다. 한 번 드셔보시겠어요?"
-      ];
-      reply = defaultReplies[Math.floor(Math.random() * defaultReplies.length)];
-
-      // 전체 메뉴에서 랜덤 4개 뽑기
-      const allPool = allMenus.map(m => m.id);
-      recommendedIds = allPool.sort(() => 0.5 - Math.random()).slice(0, 4);
+  try {
+    const response = await fetch("http://localhost:8080/api/ai/recommend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text }),
+    });
+    
+    if (!response.ok) {
+      throw new Error("서버 응답 오류");
     }
 
-    const recommendedItems = recommendedIds.map(id => allMenus.find(m => m.id === id));
+    const data = await response.json();
+    const reply = data.recommendation;
+
+    // 전체 메뉴 리스트를 가져와서 제미나이가 추천한 텍스트 안에 메뉴 이름이나 별명(Alias)이 있는지 똑똑하게 확인
+    const allMenus = [...menuData.set, ...menuData.signature, ...menuData.caffeine, ...menuData.noncoffee, ...menuData.ade, ...menuData.dessert, ...menuData.tea];
+    const spacelessReply = reply.replace(/ /g, ""); // 띄어쓰기 무시하고 검사하기 위함
+
+    const recommendedItems = allMenus.filter(menu => {
+      // 1. 원본 이름 포함 여부
+      if (reply.includes(menu.name)) return true;
+      // 2. 띄어쓰기를 없앤 이름 포함 여부
+      const spacelessName = menu.name.replace(/ /g, "");
+      if (spacelessReply.includes(spacelessName)) return true;
+      // 3. 메뉴의 별명(Alias)이 응답에 포함되어 있는지 검사 (예: "아메리카노" -> "카페 아메리카노" 매칭)
+      if (menuAliases && menuAliases[menu.id]) {
+        for (let alias of menuAliases[menu.id]) {
+          if (spacelessReply.includes(alias.replace(/ /g, ""))) return true;
+        }
+      }
+      return false;
+    });
+
     setAiMessage(reply);
-    setAiRecommendations(recommendedItems);
+    // 만약 매칭된 카드가 없다면(드물게 발생), 전체 메뉴 중 랜덤으로 2개라도 띄워주기 (빈 화면 방지)
+    setAiRecommendations(recommendedItems.length > 0 ? recommendedItems : allMenus.sort(() => 0.5 - Math.random()).slice(0, 2));
+  } catch (error) {
+    console.error("AI 추천 통신 오류:", error);
+    setAiMessage("AI 추천 서버와 연결할 수 없습니다. 잠시 후 다시 시도해주세요.");
+  } finally {
     setIsAiThinking(false);
-  }, 1200);
+  }
 };
 
 const processVoiceOrder = (text) => {
   setLastRecognizedText(text);
   const spacelessText = text.replace(/ /g, "");
-  const allMenus = Object.values(menuData).flat().filter(Boolean);
+  const allMenus = [...menuData.set, ...menuData.signature, ...menuData.caffeine, ...menuData.noncoffee, ...menuData.ade, ...menuData.dessert, ...menuData.tea];
 
   if (spacelessText.includes("결제") || spacelessText.includes("계산")) {
     if (activeModal !== 'RECEIPT' && activeModal !== 'PROCESSING' && activeModal !== 'PAYMENT') {
@@ -299,36 +265,10 @@ const processVoiceOrder = (text) => {
 
     let foundItems = [];
     allMenus.forEach(item => {
-      if (!item) return;
-      const originalName = item.name.replace(/ /g, "");
-      const cleanName = originalName.replace(/\(.*\)/g, "");
-
-      // 1. 기본 별칭 목록 (이름 + 로컬 별칭)
-      let itemAliases = [cleanName, originalName, ...(menuAliases[item.id] || [])];
-
-      // 2. 핵심 키워드 자동 추출 (접두사/접미사 제거)
-      // 예: "카페 아메리카노" -> "아메리카노", "딸기 에이드" -> "딸기"
-      const prefixes = ["카페", "말말", "유기농", "제주", "생", "수제"];
-      prefixes.forEach(p => {
-        if (cleanName.startsWith(p) && cleanName.length > p.length) {
-          itemAliases.push(cleanName.replace(p, ""));
-        }
-      });
-      const suffixes = ["라떼", "에이드", "티", "차", "주스", "스무디"];
-      suffixes.forEach(s => {
-        if (cleanName.endsWith(s) && cleanName.length > s.length) {
-          itemAliases.push(cleanName.replace(s, ""));
-        }
-      });
-
-      // 중복 제거 및 검색 실행
-      const uniqueAliases = [...new Set(itemAliases.filter(Boolean))];
-      for (let alias of uniqueAliases) {
+      const itemAliases = menuAliases[item.id] || [];
+      for (let alias of itemAliases) {
         const idx = spacelessText.indexOf(alias);
-        if (idx !== -1) { 
-          foundItems.push({ item, index: idx, nameLength: alias.length }); 
-          break; 
-        }
+        if (idx !== -1) { foundItems.push({ item, index: idx, nameLength: alias.length }); break; }
       }
     });
 
@@ -349,7 +289,7 @@ const processVoiceOrder = (text) => {
       if (spacelessText.includes("에이드") || spacelessText.includes("주스")) { handleCategoryClick('ade'); return; }
       if (spacelessText.includes("차") || spacelessText.includes("티")) { handleCategoryClick('tea'); return; }
 
-      alert(`메뉴를 찾지 못했습니다.\n(인식된 말: "${text}")`);
+      if (!isListening) alert(`메뉴를 찾지 못했습니다.\n(인식된 말: "${text}")`);
       return;
     }
 
