@@ -30,6 +30,7 @@ public class GeminiService {
         this.restTemplate = new RestTemplate();
     }
 
+    @SuppressWarnings("unchecked")
     public String getRecommendation(String userMessage) {
         // 1. DB에서 전체 메뉴 조회
         List<Menu> menus = menuRepository.findAll();
@@ -45,7 +46,7 @@ public class GeminiService {
                 + menuInfo.toString()
                 + "\n[중요 규칙]\n"
                 + "1. 반드시 위에 나열된 '현재 판매 중인 메뉴 목록' 안에서만 메뉴를 추천해야 해. 목록에 없는 메뉴는 절대로 지어내서 추천하면 안 돼.\n"
-                + "2. 손님의 요청에 가장 잘 맞는 메뉴를 1~2개 고르고, 왜 추천하는지 친절하게 설명해줘.\n"
+                + "2. 손님의 요청에 가장 잘 맞는 메뉴를 3~4개 고르고, 왜 추천하는지 친절하게 설명해줘.\n"
                 + "3. 응답은 손님에게 말하듯 자연스럽게 3문장 이내로 대답해줘.";
 
         // 3. API 요청 바디 구성

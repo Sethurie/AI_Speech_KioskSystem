@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
-import { numWords, menuAliases, optionOptions } from './data';
+import { numWords, menuAliasesByName, optionOptions } from './data';
 
 function App() {
   const [isSplashScreen, setIsSplashScreen] = useState(true);
@@ -69,823 +69,848 @@ function App() {
       });
   }, []);
 
-const recognitionTimeoutRef = useRef(null);
+  const recognitionTimeoutRef = useRef(null);
+  const recognitionRef = useRef(null);
 
-const totalAmount = cart.reduce((sum, item) => sum + item.price * item.count, 0);
-const cartWithUniqueKey = cart.map(item => ({ ...item, uniqueKey: item.id + "_" + item.optionKey }));
+  const totalAmount = cart.reduce((sum, item) => sum + item.price * item.count, 0);
+  const cartWithUniqueKey = cart.map(item => ({ ...item, uniqueKey: item.id + "_" + item.optionKey }));
 
-const changeCount = (uniqueKey, delta) => {
-  setCart((prev) => prev.map((item) => {
-    const itemUniqueKey = item.id + "_" + item.optionKey;
-    return itemUniqueKey === uniqueKey ? { ...item, count: item.count + delta } : item;
-  }).filter((item) => item.count > 0));
-};
+  const changeCount = (uniqueKey, delta) => {
+    setCart((prev) => prev.map((item) => {
+      const itemUniqueKey = item.id + "_" + item.optionKey;
+      return itemUniqueKey === uniqueKey ? { ...item, count: item.count + delta } : item;
+    }).filter((item) => item.count > 0));
+  };
 
-const removeItemCompletely = (uniqueKey) => {
-  setCart((prev) => prev.filter((item) => {
-    const itemUniqueKey = item.id + "_" + item.optionKey;
-    return itemUniqueKey !== uniqueKey;
-  }));
-};
+  const removeItemCompletely = (uniqueKey) => {
+    setCart((prev) => prev.filter((item) => {
+      const itemUniqueKey = item.id + "_" + item.optionKey;
+      return itemUniqueKey !== uniqueKey;
+    }));
+  };
 
-const processNextInQueue = (currentQueue) => {
-  if (currentQueue && currentQueue.length > 1) {
-    const nextQueue = currentQueue.slice(1);
-    setOrderQueue(nextQueue);
-    openDetailModal(nextQueue[0].item, nextQueue[0].qty);
-  } else {
-    setOrderQueue([]);
-    setActiveModal('MAIN');
-    setActiveDetailItem(null);
-  }
-};
-
-const addFinalItemToCartWithOpts = (opts) => {
-  setCart((prev) => {
-    const optionKey = JSON.stringify(opts);
-    const existingIdx = prev.findIndex((i) => i.id === activeDetailItem.id && i.optionKey === optionKey);
-
-    let price = activeDetailItem.price;
-    if (opts.shot === "에스프레소 샷 추가 (+500원)") price += 500;
-
-    if (existingIdx !== -1) {
-      return prev.map((i, idx) =>
-        idx === existingIdx ? { ...i, count: i.count + currentModalQty, price: price } : i
-      );
+  const processNextInQueue = (currentQueue) => {
+    if (currentQueue && currentQueue.length > 1) {
+      const nextQueue = currentQueue.slice(1);
+      setOrderQueue(nextQueue);
+      openDetailModal(nextQueue[0].item, nextQueue[0].qty, nextQueue[0].options);
+    } else {
+      setOrderQueue([]);
+      setActiveModal('MAIN');
+      setActiveDetailItem(null);
     }
-    return [...prev, { ...activeDetailItem, count: currentModalQty, price: price, options: { ...opts }, optionKey: optionKey }];
-  });
-  processNextInQueue(orderQueue);
-};
+  };
 
-const addFinalItemToCart = () => addFinalItemToCartWithOpts(currentOptions);
+  const addFinalItemToCartWithOpts = (opts) => {
+    setCart((prev) => {
+      const optionKey = JSON.stringify(opts);
+      const existingIdx = prev.findIndex((i) => i.id === activeDetailItem.id && i.optionKey === optionKey);
 
-const handleCancelModal = () => processNextInQueue(orderQueue);
+      let price = activeDetailItem.price;
+      if (opts.shot === "에스프레소 샷 추가 (+500원)") price += 500;
 
-const handleMenuClick = (item) => {
-  if (item.type === 'NONE') {
-    setCart(prevCart => {
-      let newCart = [...prevCart];
-      const existingIdx = newCart.findIndex(i => i.id === item.id && i.optionKey === "{}");
-      if (existingIdx !== -1) newCart[existingIdx] = { ...newCart[existingIdx], count: newCart[existingIdx].count + 1 };
-      else newCart.push({ ...item, count: 1, options: {}, optionKey: "{}" });
-      return newCart;
-    });
-  } else {
-    setOrderQueue([{ item: item, qty: 1 }]);
-    openDetailModal(item, 1);
-  }
-};
-
-// ⭐️ [신규] 완전히 랜덤화되고 똑똑해진 AI 추천 로직 (백엔드 Gemini API 연동)
-const fetchAiRecommendation = async (text) => {
-  setIsAiThinking(true);
-  setAiRecommendations([]);
-
-  try {
-    const response = await fetch("http://localhost:8080/api/ai/recommend", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text }),
-    });
-    
-    if (!response.ok) {
-      throw new Error("서버 응답 오류");
-    }
-
-    const data = await response.json();
-    const reply = data.recommendation;
-
-    // 전체 메뉴 리스트를 가져와서 제미나이가 추천한 텍스트 안에 메뉴 이름이나 별명(Alias)이 있는지 똑똑하게 확인
-    const allMenus = [...menuData.set, ...menuData.signature, ...menuData.caffeine, ...menuData.noncoffee, ...menuData.ade, ...menuData.dessert, ...menuData.tea];
-    const spacelessReply = reply.replace(/ /g, ""); // 띄어쓰기 무시하고 검사하기 위함
-
-    const recommendedItems = allMenus.filter(menu => {
-      // 1. 원본 이름 포함 여부
-      if (reply.includes(menu.name)) return true;
-      // 2. 띄어쓰기를 없앤 이름 포함 여부
-      const spacelessName = menu.name.replace(/ /g, "");
-      if (spacelessReply.includes(spacelessName)) return true;
-      // 3. 메뉴의 별명(Alias)이 응답에 포함되어 있는지 검사 (예: "아메리카노" -> "카페 아메리카노" 매칭)
-      if (menuAliases && menuAliases[menu.id]) {
-        for (let alias of menuAliases[menu.id]) {
-          if (spacelessReply.includes(alias.replace(/ /g, ""))) return true;
-        }
+      if (existingIdx !== -1) {
+        return prev.map((i, idx) =>
+          idx === existingIdx ? { ...i, count: i.count + currentModalQty, price: price } : i
+        );
       }
-      return false;
+      return [...prev, { ...activeDetailItem, count: currentModalQty, price: price, options: { ...opts }, optionKey: optionKey }];
     });
+    processNextInQueue(orderQueue);
+  };
 
-    setAiMessage(reply);
-    // 만약 매칭된 카드가 없다면(드물게 발생), 전체 메뉴 중 랜덤으로 2개라도 띄워주기 (빈 화면 방지)
-    setAiRecommendations(recommendedItems.length > 0 ? recommendedItems : allMenus.sort(() => 0.5 - Math.random()).slice(0, 2));
-  } catch (error) {
-    console.error("AI 추천 통신 오류:", error);
-    setAiMessage("AI 추천 서버와 연결할 수 없습니다. 잠시 후 다시 시도해주세요.");
-  } finally {
-    setIsAiThinking(false);
-  }
-};
+  const addFinalItemToCart = () => addFinalItemToCartWithOpts(currentOptions);
 
-const processVoiceOrder = (text) => {
-  setLastRecognizedText(text);
-  const spacelessText = text.replace(/ /g, "");
-  const allMenus = [...menuData.set, ...menuData.signature, ...menuData.caffeine, ...menuData.noncoffee, ...menuData.ade, ...menuData.dessert, ...menuData.tea];
+  const handleCancelModal = () => processNextInQueue(orderQueue);
 
-  if (spacelessText.includes("결제") || spacelessText.includes("계산")) {
-    if (activeModal !== 'RECEIPT' && activeModal !== 'PROCESSING' && activeModal !== 'PAYMENT') {
-      startPaymentFlow();
-      return;
+  const handleMenuClick = (item) => {
+    if (item.type === 'NONE') {
+      setCart(prevCart => {
+        let newCart = [...prevCart];
+        const existingIdx = newCart.findIndex(i => i.id === item.id && i.optionKey === "{}");
+        if (existingIdx !== -1) newCart[existingIdx] = { ...newCart[existingIdx], count: newCart[existingIdx].count + 1 };
+        else newCart.push({ ...item, count: 1, options: {}, optionKey: "{}" });
+        return newCart;
+      });
+    } else {
+      setOrderQueue([{ item: item, qty: 1 }]);
+      openDetailModal(item, 1);
     }
-  }
+  };
 
-  if (activeModal === 'RECEIPT') {
-    if (spacelessText.includes("확인") || spacelessText.includes("처음으로") || spacelessText.includes("닫기")) { closeReceipt(); return; }
-  }
+  // ⭐️ [신규] 완전히 랜덤화되고 똑똑해진 AI 추천 로직 (백엔드 Gemini API 연동)
+  const fetchAiRecommendation = async (text) => {
+    setIsAiThinking(true);
+    setAiRecommendations([]);
 
-  if (activeModal === 'PAYMENT') {
-    let isTypeUpdated = false;
-    if (spacelessText.includes("매장") || spacelessText.includes("먹고")) { setOrderType("매장"); isTypeUpdated = true; }
-    if (spacelessText.includes("포장") || spacelessText.includes("테이크아웃") || spacelessText.includes("가져")) { setOrderType("포장"); isTypeUpdated = true; }
+    try {
+      const response = await fetch("http://localhost:8080/api/ai/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text }),
+      });
 
-    if (spacelessText.includes("현금")) { handlePaymentSelection("CASH"); return; }
-    if (spacelessText.includes("카드")) { handlePaymentSelection("CARD"); return; }
-    if (spacelessText.includes("닫기") || spacelessText.includes("취소")) { setActiveModal('MAIN'); return; }
-
-    if (isTypeUpdated) return;
-  }
-
-  if (activeModal === 'DETAIL') {
-    let newOptions = { ...currentOptions };
-    let isOptionUpdated = false;
-    const updateOpt = (key, val) => { newOptions[key] = val; isOptionUpdated = true; };
-
-    if (activeDetailItem.type !== 'NONE') {
-      if (spacelessText.includes("얼음조금")) updateOpt("ice", "얼음 조금");
-      if (spacelessText.includes("얼음중간")) updateOpt("ice", "얼음 중간");
-      if (spacelessText.includes("얼음많이")) updateOpt("ice", "얼음 많이");
-      if (spacelessText.includes("얼음없이") || spacelessText.includes("얼음빼고")) updateOpt("ice", "없음");
-
-      if (spacelessText.includes("핫") || spacelessText.includes("따뜻한")) updateOpt("temp", "HOT");
-      if (spacelessText.includes("아이스") || spacelessText.includes("차가운")) updateOpt("temp", "ICE");
-
-      if (spacelessText.includes("당도30")) updateOpt("sweetness", "30%");
-      if (spacelessText.includes("당도50") || spacelessText.includes("당도기본")) updateOpt("sweetness", "50% (기본)");
-      if (spacelessText.includes("당도70")) updateOpt("sweetness", "70%");
-      if (spacelessText.includes("당도100")) updateOpt("sweetness", "100%");
-
-      if (spacelessText.includes("펄추가")) updateOpt("pearl", "타피오카 펄 추가");
-      if (spacelessText.includes("화이트펄추가")) updateOpt("pearl", "화이트 펄 추가");
-      if (spacelessText.includes("펄없이") || spacelessText.includes("펄빼고")) updateOpt("pearl", "없음");
-
-      if (spacelessText.includes("샷추가")) updateOpt("shot", "에스프레소 샷 추가 (+500원)");
-      if (spacelessText.includes("샷없이") || spacelessText.includes("샷빼고")) updateOpt("shot", "없음");
-    }
-
-    if (isOptionUpdated) {
-      setCurrentOptions(newOptions);
-    }
-
-    if (spacelessText.includes("확인") || spacelessText.includes("담기") || spacelessText.includes("담아") || spacelessText.includes("주문")) {
-      addFinalItemToCartWithOpts(newOptions);
-      return;
-    }
-    if (spacelessText.includes("닫기") || spacelessText.includes("취소")) {
-      handleCancelModal();
-      return;
-    }
-    if (isOptionUpdated) return;
-  }
-
-  if (activeModal === 'MAIN') {
-    const isClearAll = (spacelessText.includes("전부") || spacelessText.includes("모두") || spacelessText.includes("전체") || spacelessText.includes("싹다")) &&
-      (spacelessText.includes("취소") || spacelessText.includes("빼") || spacelessText.includes("삭제") || spacelessText.includes("비워")) ||
-      spacelessText.includes("다취소") || spacelessText.includes("다빼") || spacelessText.includes("다삭제") || spacelessText.includes("전부비워");
-
-    if (isClearAll) { setCart([]); return; }
-
-    let foundItems = [];
-    allMenus.forEach(item => {
-      const itemAliases = menuAliases[item.id] || [];
-      for (let alias of itemAliases) {
-        const idx = spacelessText.indexOf(alias);
-        if (idx !== -1) { foundItems.push({ item, index: idx, nameLength: alias.length }); break; }
-      }
-    });
-
-    if (foundItems.length === 0) {
-      const isSwitchingCategory = (spacelessText.includes("시그니처") || spacelessText.includes("세트") || spacelessText.includes("커피") || spacelessText.includes("에스프레소") || spacelessText.includes("논커피") || spacelessText.includes("디저트") || spacelessText.includes("푸드") || spacelessText.includes("에이드") || spacelessText.includes("주스") || spacelessText.includes("차") || spacelessText.includes("티")) && !spacelessText.includes("추천");
-
-      if ((spacelessText.includes("추천") || activeCategory === 'ai_recommend') && !isSwitchingCategory) {
-        if (activeCategory !== 'ai_recommend') handleCategoryClick('ai_recommend');
-        fetchAiRecommendation(text);
-        return;
+      if (!response.ok) {
+        throw new Error("서버 응답 오류");
       }
 
-      if (spacelessText.includes("시그니처")) { handleCategoryClick('signature'); return; }
-      if (spacelessText.includes("세트")) { handleCategoryClick('set'); return; }
-      if (spacelessText.includes("커피") || spacelessText.includes("에스프레소")) { handleCategoryClick('caffeine'); return; }
-      if (spacelessText.includes("논커피")) { handleCategoryClick('noncoffee'); return; }
-      if (spacelessText.includes("디저트") || spacelessText.includes("푸드")) { handleCategoryClick('dessert'); return; }
-      if (spacelessText.includes("에이드") || spacelessText.includes("주스")) { handleCategoryClick('ade'); return; }
-      if (spacelessText.includes("차") || spacelessText.includes("티")) { handleCategoryClick('tea'); return; }
+      const data = await response.json();
+      const reply = data.recommendation;
 
-      if (!isListening) alert(`메뉴를 찾지 못했습니다.\n(인식된 말: "${text}")`);
-      return;
-    }
+      // 전체 메뉴 리스트를 가져와서 제미나이가 추천한 텍스트 안에 메뉴 이름이나 별명(Alias)이 있는지 똑똑하게 확인
+      const allMenus = [...menuData.set, ...menuData.signature, ...menuData.caffeine, ...menuData.noncoffee, ...menuData.ade, ...menuData.dessert, ...menuData.tea];
+      const spacelessReply = reply.replace(/ /g, ""); // 띄어쓰기 무시하고 검사하기 위함
 
-    let validItems = [];
-    foundItems.forEach(current => {
-      const isOverlappedAndShorter = foundItems.some(other => {
-        if (current === other) return false;
-        const currentStart = current.index, currentEnd = current.index + current.nameLength;
-        const otherStart = other.index, otherEnd = other.index + other.nameLength;
-        if (Math.max(currentStart, otherStart) < Math.min(currentEnd, otherEnd)) {
-          return current.nameLength < other.nameLength || (current.nameLength === other.nameLength && current.item.id > other.item.id);
+      const recommendedItems = allMenus.filter(menu => {
+        // 1. 원본 이름 포함 여부
+        if (reply.includes(menu.name)) return true;
+        // 2. 띄어쓰기를 없앤 이름 포함 여부
+        const spacelessName = menu.name.replace(/ /g, "");
+        if (spacelessReply.includes(spacelessName)) return true;
+        // 3. 메뉴의 별명(Alias)이 응답에 포함되어 있는지 검사 (예: "아메리카노" -> "카페 아메리카노" 매칭)
+        if (menuAliasesByName && menuAliasesByName[menu.name]) {
+          for (let alias of menuAliasesByName[menu.name]) {
+            if (spacelessReply.includes(alias.replace(/ /g, ""))) return true;
+          }
         }
         return false;
       });
-      if (!isOverlappedAndShorter) validItems.push(current);
-    });
 
-    validItems.sort((a, b) => a.index - b.index);
+      setAiMessage(reply);
+      // 만약 매칭된 카드가 없다면(드물게 발생), 전체 메뉴 중 랜덤으로 2개라도 띄워주기 (빈 화면 방지)
+      setAiRecommendations(recommendedItems.length > 0 ? recommendedItems : allMenus.sort(() => 0.5 - Math.random()).slice(0, 2));
+    } catch (error) {
+      console.error("AI 추천 통신 오류:", error);
+      setAiMessage("AI 추천 서버와 연결할 수 없습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setIsAiThinking(false);
+    }
+  };
 
-    const actions = [];
-    validItems.forEach((found, i) => {
-      const itemEnd = found.index + found.nameLength;
-      const restOfText = spacelessText.substring(itemEnd);
+  const processVoiceOrder = (text) => {
+    setLastRecognizedText(text);
+    const spacelessText = text.replace(/ /g, "");
+    const allMenus = [...menuData.set, ...menuData.signature, ...menuData.caffeine, ...menuData.noncoffee, ...menuData.ade, ...menuData.dessert, ...menuData.tea];
 
-      const removeMatch = restOfText.match(/취소|빼|삭제|없애/);
-      const addMatch = restOfText.match(/추가|담|줘|주문|시킬/);
+    if (spacelessText.includes("결제") || spacelessText.includes("계산")) {
+      if (activeModal !== 'RECEIPT' && activeModal !== 'PROCESSING' && activeModal !== 'PAYMENT') {
+        startPaymentFlow();
+        return;
+      }
+    }
 
-      let itemAction = 'ADD';
-      if (removeMatch) {
-        if (!addMatch) {
-          itemAction = 'REMOVE';
-        } else if (removeMatch.index < addMatch.index) {
-          itemAction = 'REMOVE';
-        }
+    if (activeModal === 'RECEIPT') {
+      if (spacelessText.includes("확인") || spacelessText.includes("처음으로") || spacelessText.includes("닫기")) { closeReceipt(); return; }
+    }
+
+    if (activeModal === 'PAYMENT') {
+      let isTypeUpdated = false;
+      if (spacelessText.includes("매장") || spacelessText.includes("먹고")) { setOrderType("매장"); isTypeUpdated = true; }
+      if (spacelessText.includes("포장") || spacelessText.includes("테이크아웃") || spacelessText.includes("가져")) { setOrderType("포장"); isTypeUpdated = true; }
+
+      if (spacelessText.includes("현금")) { handlePaymentSelection("CASH"); return; }
+      if (spacelessText.includes("카드")) { handlePaymentSelection("CARD"); return; }
+      if (spacelessText.includes("닫기") || spacelessText.includes("취소")) { setActiveModal('MAIN'); return; }
+
+      if (isTypeUpdated) return;
+    }
+
+    if (activeModal === 'DETAIL') {
+      let newOptions = { ...currentOptions };
+      let isOptionUpdated = false;
+      const updateOpt = (key, val) => { newOptions[key] = val; isOptionUpdated = true; };
+
+      if (activeDetailItem.type !== 'NONE') {
+        if (spacelessText.includes("얼음조금")) updateOpt("ice", "얼음 조금");
+        if (spacelessText.includes("얼음중간")) updateOpt("ice", "얼음 중간");
+        if (spacelessText.includes("얼음많이")) updateOpt("ice", "얼음 많이");
+        if (spacelessText.includes("얼음없이") || spacelessText.includes("얼음빼고")) updateOpt("ice", "없음");
+
+        if (spacelessText.includes("핫") || spacelessText.includes("따뜻한")) updateOpt("temp", "HOT");
+        if (spacelessText.includes("아이스") || spacelessText.includes("차가운")) updateOpt("temp", "ICE");
+
+        if (spacelessText.includes("당도30")) updateOpt("sweetness", "30%");
+        if (spacelessText.includes("당도50") || spacelessText.includes("당도기본")) updateOpt("sweetness", "50% (기본)");
+        if (spacelessText.includes("당도70")) updateOpt("sweetness", "70%");
+        if (spacelessText.includes("당도100")) updateOpt("sweetness", "100%");
+
+        if (spacelessText.includes("펄추가")) updateOpt("pearl", "타피오카 펄 추가");
+        if (spacelessText.includes("화이트펄추가")) updateOpt("pearl", "화이트 펄 추가");
+        if (spacelessText.includes("펄없이") || spacelessText.includes("펄빼고")) updateOpt("pearl", "없음");
+
+        if (spacelessText.includes("샷추가")) updateOpt("shot", "에스프레소 샷 추가 (+500원)");
+        if (spacelessText.includes("샷없이") || spacelessText.includes("샷빼고")) updateOpt("shot", "없음");
       }
 
-      const nextIndex = i + 1 < validItems.length ? validItems[i + 1].index : spacelessText.length;
-      const chunk = spacelessText.substring(itemEnd, nextIndex);
-      let qty = 1;
-      const digitMatch = chunk.match(/\d+/);
-      if (digitMatch) qty = parseInt(digitMatch[0], 10);
-      else for (let nw of numWords) if (chunk.includes(nw.word)) { qty = nw.num; break; }
+      if (isOptionUpdated) {
+        setCurrentOptions(newOptions);
+      }
 
-      actions.push({ type: itemAction, item: found.item, qty });
-    });
+      if (spacelessText.includes("확인") || spacelessText.includes("담기") || spacelessText.includes("담아") || spacelessText.includes("주문")) {
+        addFinalItemToCartWithOpts(newOptions);
+        return;
+      }
+      if (spacelessText.includes("닫기") || spacelessText.includes("취소")) {
+        handleCancelModal();
+        return;
+      }
+      if (isOptionUpdated) return;
+    }
 
-    let newQueue = [];
-    let directAddActions = [];
-    let itemsToRemove = [];
+    if (activeModal === 'MAIN') {
+      const isClearAll = (spacelessText.includes("전부") || spacelessText.includes("모두") || spacelessText.includes("전체") || spacelessText.includes("싹다")) &&
+        (spacelessText.includes("취소") || spacelessText.includes("빼") || spacelessText.includes("삭제") || spacelessText.includes("비워")) ||
+        spacelessText.includes("다취소") || spacelessText.includes("다빼") || spacelessText.includes("다삭제") || spacelessText.includes("전부비워");
 
-    actions.forEach(action => {
-      if (action.type === 'REMOVE') {
-        itemsToRemove.push(action.item);
-      } else {
-        if (action.item.type === 'NONE') {
-          action.options = {};
-          action.optionKey = "{}";
-          directAddActions.push(action);
+      if (isClearAll) { setCart([]); return; }
+
+      let foundItems = [];
+      allMenus.forEach(item => {
+        const itemAliases = menuAliasesByName[item.name] || [];
+        const spacelessName = item.name.replace(/ /g, "");
+        const allAliasesToSearch = [spacelessName, ...itemAliases];
+
+        for (let alias of allAliasesToSearch) {
+          const idx = spacelessText.indexOf(alias);
+          if (idx !== -1) { foundItems.push({ item, index: idx, nameLength: alias.length }); break; }
+        }
+      });
+
+      if (foundItems.length === 0) {
+        const isSwitchingCategory = (spacelessText.includes("시그니처") || spacelessText.includes("세트") || spacelessText.includes("커피") || spacelessText.includes("에스프레소") || spacelessText.includes("논커피") || spacelessText.includes("디저트") || spacelessText.includes("푸드") || spacelessText.includes("에이드") || spacelessText.includes("주스") || spacelessText.includes("차") || spacelessText.includes("티")) && !spacelessText.includes("추천");
+
+        if ((spacelessText.includes("추천") || activeCategory === 'ai_recommend') && !isSwitchingCategory) {
+          if (activeCategory !== 'ai_recommend') handleCategoryClick('ai_recommend');
+          fetchAiRecommendation(text);
+          return;
+        }
+
+        if (spacelessText.includes("시그니처")) { handleCategoryClick('signature'); return; }
+        if (spacelessText.includes("세트")) { handleCategoryClick('set'); return; }
+        if (spacelessText.includes("커피") || spacelessText.includes("에스프레소")) { handleCategoryClick('caffeine'); return; }
+        if (spacelessText.includes("논커피")) { handleCategoryClick('noncoffee'); return; }
+        if (spacelessText.includes("디저트") || spacelessText.includes("푸드")) { handleCategoryClick('dessert'); return; }
+        if (spacelessText.includes("에이드") || spacelessText.includes("주스")) { handleCategoryClick('ade'); return; }
+        if (spacelessText.includes("차") || spacelessText.includes("티")) { handleCategoryClick('tea'); return; }
+
+        if (!isListening) alert(`메뉴를 찾지 못했습니다.\n(인식된 말: "${text}")`);
+        return;
+      }
+
+      let validItems = [];
+      foundItems.forEach(current => {
+        const isOverlappedAndShorter = foundItems.some(other => {
+          if (current === other) return false;
+          const currentStart = current.index, currentEnd = current.index + current.nameLength;
+          const otherStart = other.index, otherEnd = other.index + other.nameLength;
+          if (Math.max(currentStart, otherStart) < Math.min(currentEnd, otherEnd)) {
+            return current.nameLength < other.nameLength || (current.nameLength === other.nameLength && current.item.id > other.item.id);
+          }
+          return false;
+        });
+        if (!isOverlappedAndShorter) validItems.push(current);
+      });
+
+      validItems.sort((a, b) => a.index - b.index);
+
+      const actions = [];
+      validItems.forEach((found, i) => {
+        const itemEnd = found.index + found.nameLength;
+        const restOfText = spacelessText.substring(itemEnd);
+
+        const removeMatch = restOfText.match(/취소|빼|삭제|없애/);
+        const addMatch = restOfText.match(/추가|담|줘|주문|시킬/);
+
+        let itemAction = 'ADD';
+        if (removeMatch) {
+          if (!addMatch) {
+            itemAction = 'REMOVE';
+          } else if (removeMatch.index < addMatch.index) {
+            itemAction = 'REMOVE';
+          }
+        }
+
+        const nextIndex = i + 1 < validItems.length ? validItems[i + 1].index : spacelessText.length;
+        const chunk = spacelessText.substring(itemEnd, nextIndex);
+        let qty = 1;
+        const digitMatch = chunk.match(/\d+/);
+        if (digitMatch) qty = parseInt(digitMatch[0], 10);
+        else for (let nw of numWords) if (chunk.includes(nw.word)) { qty = nw.num; break; }
+
+        actions.push({ type: itemAction, item: found.item, qty });
+      });
+
+      let newQueue = [];
+      let directAddActions = [];
+      let itemsToRemove = [];
+
+      actions.forEach(action => {
+        if (action.type === 'REMOVE') {
+          itemsToRemove.push(action.item);
         } else {
-          let defaultOpts = { shot: "없음" };
-          if (action.item.type !== 'NONE') {
-            defaultOpts = {
-              temp: action.item.type === 'HOT' || action.item.type === 'BOTH' ? 'HOT' : 'ICE',
-              ice: action.item.type === 'ICE' ? '얼음 중간' : '없음',
-              sweetness: '50% (기본)',
-              pearl: '없음',
-              shot: "없음"
-            };
-          }
-
-          let newOptions = { ...defaultOpts };
-          let isOptionExplicit = false;
-
-          if (spacelessText.includes("기본") || spacelessText.includes("그냥")) {
-            isOptionExplicit = true;
-          }
-
-          const updateOpt = (key, val) => { newOptions[key] = val; isOptionExplicit = true; };
-
-          if (action.item.type !== 'HOT') {
-            if (spacelessText.includes("얼음조금")) updateOpt("ice", "얼음 조금");
-            if (spacelessText.includes("얼음중간")) updateOpt("ice", "얼음 중간");
-            if (spacelessText.includes("얼음많이")) updateOpt("ice", "얼음 많이");
-            if (spacelessText.includes("얼음없이") || spacelessText.includes("얼음빼고")) updateOpt("ice", "없음");
-          }
-
-          if (spacelessText.includes("핫") || spacelessText.includes("따뜻한") || spacelessText.includes("따듯한") || spacelessText.includes("뜨아") || spacelessText.includes("핫초코")) {
-            if (action.item.type !== 'ICE') {
-              updateOpt("temp", "HOT");
-              newOptions.ice = "없음";
-            }
-          }
-          if (spacelessText.includes("아이스") || spacelessText.includes("차가운") || spacelessText.includes("아아") || spacelessText.includes("아이스초코")) {
-            if (action.item.type !== 'HOT') {
-              updateOpt("temp", "ICE");
-              if (newOptions.ice === "없음" && !spacelessText.includes("얼음없이") && !spacelessText.includes("얼음빼고")) newOptions.ice = "얼음 중간";
-            }
-          }
-
-          if (spacelessText.includes("당도30")) updateOpt("sweetness", "30%");
-          if (spacelessText.includes("당도50") || spacelessText.includes("당도기본")) updateOpt("sweetness", "50% (기본)");
-          if (spacelessText.includes("당도70")) updateOpt("sweetness", "70%");
-          if (spacelessText.includes("당도100")) updateOpt("sweetness", "100%");
-
-          if (spacelessText.includes("펄추가")) updateOpt("pearl", "타피오카 펄 추가");
-          if (spacelessText.includes("화이트펄추가") || spacelessText.includes("알로에펄추가")) updateOpt("pearl", "화이트 펄 추가");
-          if (spacelessText.includes("펄없이") || spacelessText.includes("펄빼고")) updateOpt("pearl", "없음");
-
-          if (spacelessText.includes("샷추가")) updateOpt("shot", "에스프레소 샷 추가 (+500원)");
-          if (spacelessText.includes("샷없이") || spacelessText.includes("샷빼고")) updateOpt("shot", "없음");
-
-          if (isOptionExplicit) {
-            action.options = newOptions;
-            action.optionKey = JSON.stringify(newOptions);
+          if (action.item.type === 'NONE') {
+            action.options = {};
+            action.optionKey = "{}";
             directAddActions.push(action);
           } else {
-            newQueue.push({ item: action.item, qty: action.qty });
+            let defaultOpts = { shot: "없음" };
+            if (action.item.type !== 'NONE') {
+              defaultOpts = {
+                temp: action.item.type === 'HOT' || action.item.type === 'BOTH' ? 'HOT' : 'ICE',
+                ice: action.item.type === 'ICE' ? '얼음 중간' : '없음',
+                sweetness: '50% (기본)',
+                pearl: '없음',
+                shot: "없음"
+              };
+            }
+
+            let newOptions = { ...defaultOpts };
+            let isDirectAdd = false;
+
+            if (spacelessText.match(/기본|그냥|바로/)) {
+              isDirectAdd = true;
+            }
+
+            const updateOpt = (key, val) => { newOptions[key] = val; };
+
+            if (action.item.type !== 'HOT') {
+              if (spacelessText.includes("얼음조금")) updateOpt("ice", "얼음 조금");
+              if (spacelessText.includes("얼음중간")) updateOpt("ice", "얼음 중간");
+              if (spacelessText.includes("얼음많이")) updateOpt("ice", "얼음 많이");
+              if (spacelessText.includes("얼음없이") || spacelessText.includes("얼음빼고")) updateOpt("ice", "없음");
+            }
+
+            if (spacelessText.includes("핫") || spacelessText.includes("따뜻한") || spacelessText.includes("따듯한") || spacelessText.includes("뜨아") || spacelessText.includes("핫초코")) {
+              if (action.item.type !== 'ICE') {
+                updateOpt("temp", "HOT");
+                newOptions.ice = "없음";
+              }
+            }
+            if (spacelessText.includes("아이스") || spacelessText.includes("차가운") || spacelessText.includes("아아") || spacelessText.includes("아이스초코")) {
+              if (action.item.type !== 'HOT') {
+                updateOpt("temp", "ICE");
+                if (newOptions.ice === "없음" && !spacelessText.includes("얼음없이") && !spacelessText.includes("얼음빼고")) newOptions.ice = "얼음 중간";
+              }
+            }
+
+            if (spacelessText.includes("당도30")) updateOpt("sweetness", "30%");
+            if (spacelessText.includes("당도50") || spacelessText.includes("당도기본")) updateOpt("sweetness", "50% (기본)");
+            if (spacelessText.includes("당도70")) updateOpt("sweetness", "70%");
+            if (spacelessText.includes("당도100")) updateOpt("sweetness", "100%");
+
+            if (spacelessText.includes("펄추가")) updateOpt("pearl", "타피오카 펄 추가");
+            if (spacelessText.includes("화이트펄추가") || spacelessText.includes("알로에펄추가")) updateOpt("pearl", "화이트 펄 추가");
+            if (spacelessText.includes("펄없이") || spacelessText.includes("펄빼고")) updateOpt("pearl", "없음");
+
+            if (spacelessText.includes("샷추가")) updateOpt("shot", "에스프레소 샷 추가 (+500원)");
+            if (spacelessText.includes("샷없이") || spacelessText.includes("샷빼고")) updateOpt("shot", "없음");
+
+            if (isDirectAdd) {
+              action.options = newOptions;
+              action.optionKey = JSON.stringify(newOptions);
+              directAddActions.push(action);
+            } else {
+              newQueue.push({ item: action.item, qty: action.qty, options: newOptions });
+            }
           }
         }
-      }
-    });
-
-    if (itemsToRemove.length > 0) {
-      setCart(prevCart => {
-        let newCart = [...prevCart];
-        itemsToRemove.forEach(item => { newCart = newCart.filter(cartItem => cartItem.id !== item.id); });
-        return newCart;
       });
-    }
 
-    if (directAddActions.length > 0) {
-      setCart(prevCart => {
-        let newCart = [...prevCart];
-        directAddActions.forEach(action => {
-          let price = action.item.price;
-          if (action.options && action.options.shot === "에스프레소 샷 추가 (+500원)") price += 500;
-
-          const existingIdx = newCart.findIndex(i => i.id === action.item.id && i.optionKey === action.optionKey);
-          if (existingIdx !== -1) {
-            newCart[existingIdx] = { ...newCart[existingIdx], count: newCart[existingIdx].count + action.qty, price };
-          } else {
-            newCart.push({ ...action.item, count: action.qty, options: action.options || {}, optionKey: action.optionKey || "{}", price });
-          }
+      if (itemsToRemove.length > 0) {
+        setCart(prevCart => {
+          let newCart = [...prevCart];
+          itemsToRemove.forEach(item => { newCart = newCart.filter(cartItem => cartItem.id !== item.id); });
+          return newCart;
         });
-        return newCart;
-      });
+      }
+
+      if (directAddActions.length > 0) {
+        setCart(prevCart => {
+          let newCart = [...prevCart];
+          directAddActions.forEach(action => {
+            let price = action.item.price;
+            if (action.options && action.options.shot === "에스프레소 샷 추가 (+500원)") price += 500;
+
+            const existingIdx = newCart.findIndex(i => i.id === action.item.id && i.optionKey === action.optionKey);
+            if (existingIdx !== -1) {
+              newCart[existingIdx] = { ...newCart[existingIdx], count: newCart[existingIdx].count + action.qty, price };
+            } else {
+              newCart.push({ ...action.item, count: action.qty, options: action.options || {}, optionKey: action.optionKey || "{}", price });
+            }
+          });
+          return newCart;
+        });
+      }
+
+      if (newQueue.length > 0) {
+        setOrderQueue(newQueue);
+        openDetailModal(newQueue[0].item, newQueue[0].qty, newQueue[0].options);
+      }
+    }
+  };
+
+  const startVoiceRecognition = () => {
+    if (isListening) {
+      setIsListening(false);
+      if (recognitionRef.current) recognitionRef.current.stop();
+      if (recognitionTimeoutRef.current) clearTimeout(recognitionTimeoutRef.current);
+      return;
     }
 
-    if (newQueue.length > 0) {
-      setOrderQueue(newQueue);
-      openDetailModal(newQueue[0].item, newQueue[0].qty);
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return alert("크롬 브라우저를 사용해 주세요.");
+
+    if (!recognitionRef.current) {
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.lang = 'ko-KR';
+      // continuous를 false로 변경: 사용자가 말을 멈추면 즉시 인식을 종료하고 결과를 반환하여 반응 속도를 대폭 높임
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = false;
     }
-  }
-};
 
-const startVoiceRecognition = () => {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) return alert("크롬 브라우저를 사용해 주세요.");
+    const recognition = recognitionRef.current;
 
-  const recognition = new SpeechRecognition();
-  recognition.lang = 'ko-KR';
-  recognition.continuous = true;
-  recognition.interimResults = false;
+    recognition.onstart = () => {
+      setIsListening(true);
+      setLastRecognizedText("");
 
-  recognition.onstart = () => {
-    setIsListening(true);
-    setLastRecognizedText("");
-
-    recognitionTimeoutRef.current = setTimeout(() => {
-      recognition.stop();
-    }, 15000);
-  };
-
-  recognition.onend = () => {
-    setIsListening(false);
-    if (recognitionTimeoutRef.current) clearTimeout(recognitionTimeoutRef.current);
-  };
-
-  recognition.onerror = () => {
-    setIsListening(false);
-    if (recognitionTimeoutRef.current) clearTimeout(recognitionTimeoutRef.current);
-  };
-
-  recognition.onresult = (event) => {
-    const lastIdx = event.results.length - 1;
-    const transcript = event.results[lastIdx][0].transcript;
-
-    processVoiceOrder(transcript);
-    recognition.stop();
-  };
-
-  recognition.start();
-};
-
-const openDetailModal = (item, qty = 1) => {
-  setActiveDetailItem(item);
-  setCurrentModalQty(qty);
-  setActiveModal('DETAIL');
-  let defaultOptions = { shot: "없음" };
-  if (item.type !== 'NONE') {
-    defaultOptions = {
-      temp: item.type === 'HOT' || item.type === 'BOTH' ? 'HOT' : 'ICE',
-      ice: item.type !== 'HOT' ? '얼음 중간' : '없음',
-      sweetness: '50% (기본)',
-      pearl: '없음',
-      shot: "없음"
+      recognitionTimeoutRef.current = setTimeout(() => {
+        recognition.stop();
+      }, 15000);
     };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      if (recognitionTimeoutRef.current) clearTimeout(recognitionTimeoutRef.current);
+    };
+
+    recognition.onerror = () => {
+      setIsListening(false);
+      if (recognitionTimeoutRef.current) clearTimeout(recognitionTimeoutRef.current);
+    };
+
+    recognition.onresult = (event) => {
+      const lastIdx = event.results.length - 1;
+      const transcript = event.results[lastIdx][0].transcript;
+
+      processVoiceOrder(transcript);
+      recognition.stop();
+    };
+
+    try {
+      recognition.start();
+    } catch (e) {
+      console.warn("음성 인식이 이미 실행 중입니다.", e);
+    }
+  };
+
+  const openDetailModal = (item, qty = 1, preSelectedOptions = null) => {
+    setActiveDetailItem(item);
+    setCurrentModalQty(qty);
+    setActiveModal('DETAIL');
+    
+    if (preSelectedOptions) {
+      setCurrentOptions(preSelectedOptions);
+    } else {
+      let defaultOptions = { shot: "없음" };
+      if (item.type !== 'NONE') {
+        defaultOptions = {
+          temp: item.type === 'HOT' || item.type === 'BOTH' ? 'HOT' : 'ICE',
+          ice: item.type !== 'HOT' ? '얼음 중간' : '없음',
+          sweetness: '50% (기본)',
+          pearl: '없음',
+          shot: "없음"
+        };
+      }
+      setCurrentOptions(defaultOptions);
+    }
+  };
+
+  const startPaymentFlow = () => {
+    if (cart.length === 0) return alert("담긴 메뉴가 없습니다.");
+    setOrderType('매장');
+    setActiveModal('PAYMENT');
+  };
+
+  const handlePaymentSelection = (method) => {
+    setLastProcessingPaymentMethod(method === "CASH" ? "현금" : "카드");
+    setActiveModal('PROCESSING');
+  };
+
+  useEffect(() => {
+    if (activeModal === 'PROCESSING') {
+      const timer = setTimeout(() => setActiveModal('RECEIPT'), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeModal]);
+
+  const closeReceipt = () => {
+    setCart([]);
+    setActiveModal('MAIN');
+    setLastRecognizedText("");
+    setIsSplashScreen(true);
+  };
+
+  const handleCategoryClick = (category) => {
+    setActiveCategory(category);
+    const menuArea = document.querySelector('.menu-area');
+    if (menuArea) menuArea.scrollTop = 0;
+  };
+
+  // ⭐️ [신규] 에러 방지를 위해 컴포넌트 내부로 안전하게 편입된 상세 모달
+  const renderItemDetailModal = () => {
+    if (!activeDetailItem) return null;
+
+    return (
+      <div className="modal">
+        <div className="modal-content">
+          <h2 style={{ margin: '0' }}>{activeDetailItem.name}</h2>
+          {orderQueue.length > 1 && (
+            <div style={{ textAlign: 'center', color: '#ff5252', fontSize: '0.8rem', fontWeight: 'bold', marginTop: '5px' }}>
+              (남은 선택 항목: {orderQueue.length - 1}개)
+            </div>
+          )}
+          <div style={{ textAlign: 'center', color: 'var(--mm-primary)', fontWeight: '900', fontSize: '1.6rem', fontFamily: 'var(--font-numeric)', margin: '20px 0', padding: '15px', background: 'var(--mm-light)', border: '1px solid rgba(128,0,32,0.1)', borderRadius: '15px' }}>
+            {(activeDetailItem.price + (currentOptions.shot === "에스프레소 샷 추가 (+500원)" ? 500 : 0)).toLocaleString()}원 <span style={{ color: '#888', fontSize: '1rem', fontWeight: 'bold', fontFamily: 'var(--font-main)' }}>(x{currentModalQty})</span>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'center', margin: '20px 0' }}>
+            <button onClick={startVoiceRecognition} className={`mic-btn ${isListening ? 'listening' : ''}`} title="옵션 음성으로 선택">🎤</button>
+          </div>
+
+          {activeDetailItem.type !== 'NONE' && (
+            <>
+              {(activeDetailItem.type === 'BOTH' || activeDetailItem.type === 'HOT') && (
+                <div className="option-group">
+                  <label className="option-title">온도</label>
+                  <div className="option-items">
+                    {optionOptions.temp.map(t => (
+                      <div key={t} onClick={() => setCurrentOptions(prev => ({ ...prev, temp: t, ice: t === 'HOT' ? '없음' : '얼음 중간' }))} className={`option-item ${currentOptions.temp === t ? 'active' : ''}`}>{t}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {currentOptions.temp === 'ICE' && activeDetailItem.type !== 'HOT' && (
+                <div className="option-group">
+                  <label className="option-title">얼음량</label>
+                  <div className="option-items">
+                    {optionOptions.ice.map(i => (
+                      <div key={i} onClick={() => setCurrentOptions(prev => ({ ...prev, ice: i }))} className={`option-item ${currentOptions.ice === i ? 'active' : ''}`}>{i}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(activeDetailItem.id >= 13 && activeDetailItem.id <= 16) || (activeDetailItem.id >= 25 && activeDetailItem.id <= 28) ? (
+                <div className="option-group">
+                  <label className="option-title">당도</label>
+                  <div className="option-items">
+                    {optionOptions.sweetness.map(s => (
+                      <div key={s} onClick={() => setCurrentOptions(prev => ({ ...prev, sweetness: s }))} className={`option-item ${currentOptions.sweetness === s ? 'active' : ''}`}>{s}</div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {(activeDetailItem.type === 'BOTH' || activeDetailItem.type === 'ICE') && (
+                <div className="option-group">
+                  <label className="option-title">펄 추가</label>
+                  <div className="option-items">
+                    {optionOptions.pearl.map(p => (
+                      <div key={p} onClick={() => setCurrentOptions(prev => ({ ...prev, pearl: p }))} className={`option-item ${currentOptions.pearl === p ? 'active' : ''}`}>{p}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="option-group">
+            <label className="option-title">샷 추가</label>
+            <div className="option-items">
+              {optionOptions.shot.map(s => (
+                <div key={s} onClick={() => setCurrentOptions(prev => ({ ...prev, shot: s }))} className={`option-item ${currentOptions.shot === s ? 'active' : ''}`}>{s}</div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', marginTop: '30px' }}>
+            <button className="close-btn" style={{ flex: 1, margin: 0, padding: '15px', color: '#666', fontSize: '1.2rem', borderRadius: '10px' }} onClick={handleCancelModal}>취소</button>
+            <button className="pay-btn" style={{ flex: 1, margin: 0, padding: '15px', fontSize: '1.2rem', borderRadius: '10px' }} onClick={addFinalItemToCart}>담기</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (isSplashScreen) {
+    return (
+      <div className="splash-screen" onClick={() => setIsSplashScreen(false)}>
+        <h1 className="splash-title">MALMAL CAFE</h1>
+        <p className="splash-subtitle">Premium AI Barista</p>
+        <div className="touch-to-start">화면을 터치하여 주문을 시작하세요</div>
+        <p style={{ position: 'absolute', bottom: '40px', opacity: 0.8, fontSize: '1.3rem', fontWeight: 600, letterSpacing: '1px' }}></p>
+      </div>
+    );
   }
-  setCurrentOptions(defaultOptions);
-};
-
-const startPaymentFlow = () => {
-  if (cart.length === 0) return alert("담긴 메뉴가 없습니다.");
-  setOrderType('매장');
-  setActiveModal('PAYMENT');
-};
-
-const handlePaymentSelection = (method) => {
-  setLastProcessingPaymentMethod(method === "CASH" ? "현금" : "카드");
-  setActiveModal('PROCESSING');
-};
-
-useEffect(() => {
-  if (activeModal === 'PROCESSING') {
-    const timer = setTimeout(() => setActiveModal('RECEIPT'), 5000);
-    return () => clearTimeout(timer);
-  }
-}, [activeModal]);
-
-const closeReceipt = () => {
-  setCart([]);
-  setActiveModal('MAIN');
-  setLastRecognizedText("");
-  setIsSplashScreen(true);
-};
-
-const handleCategoryClick = (category) => {
-  setActiveCategory(category);
-  const menuArea = document.querySelector('.menu-area');
-  if (menuArea) menuArea.scrollTop = 0;
-};
-
-// ⭐️ [신규] 에러 방지를 위해 컴포넌트 내부로 안전하게 편입된 상세 모달
-const renderItemDetailModal = () => {
-  if (!activeDetailItem) return null;
 
   return (
-    <div className="modal">
-      <div className="modal-content">
-        <h2 style={{ margin: '0' }}>{activeDetailItem.name}</h2>
-        {orderQueue.length > 1 && (
-          <div style={{ textAlign: 'center', color: '#ff5252', fontSize: '0.8rem', fontWeight: 'bold', marginTop: '5px' }}>
-            (남은 선택 항목: {orderQueue.length - 1}개)
-          </div>
-        )}
-        <div style={{ textAlign: 'center', color: 'var(--mm-primary)', fontWeight: '900', fontSize: '1.6rem', fontFamily: 'var(--font-numeric)', margin: '20px 0', padding: '15px', background: 'var(--mm-light)', border: '1px solid rgba(128,0,32,0.1)', borderRadius: '15px' }}>
-          {(activeDetailItem.price + (currentOptions.shot === "에스프레소 샷 추가 (+500원)" ? 500 : 0)).toLocaleString()}원 <span style={{ color: '#888', fontSize: '1rem', fontWeight: 'bold', fontFamily: 'var(--font-main)' }}>(x{currentModalQty})</span>
+    // ⭐️ [추가한 부분] a11y-mode (돋보기 모드) 클래스 오버라이딩 적용
+    <div className={`app-container ${isA11yMode ? 'a11y-mode' : ''}`}>
+      <nav className="sidebar">
+        <div className="logo-area">
+          <span style={{ fontSize: '2.5rem', margin: '5px 0' }}>☕</span>
+          <div style={{ fontSize: '1.2rem', fontWeight: '900' }}>말말카페</div>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'center', margin: '20px 0' }}>
-          <button onClick={startVoiceRecognition} className={`mic-btn ${isListening ? 'listening' : ''}`} title="옵션 음성으로 선택">🎤</button>
+        <div className="sidebar-bottom-area">
+          {/* ⭐️ [추가한 부분] 돋보기/접근성 모드 토글 버튼 (사이드바 하단으로 이동) */}
+          <button onClick={() => setIsA11yMode(!isA11yMode)} className="a11y-sidebar-btn" style={{ background: isA11yMode ? '#222' : '#FFEB3B', color: isA11yMode ? 'white' : '#000' }}>
+            {isA11yMode ? '🔍 원래 화면' : '🔍 큰 글씨'}
+          </button>
+
+          {lastRecognizedText && (
+            <div className="voice-debug-area" style={{ marginTop: 0 }}>
+              🎤 인식된 문장<br /><span style={{ color: 'white', fontWeight: 800 }}>"{lastRecognizedText}"</span>
+            </div>
+          )}
         </div>
-
-        {activeDetailItem.type !== 'NONE' && (
-          <>
-            {(activeDetailItem.type === 'BOTH' || activeDetailItem.type === 'HOT') && (
-              <div className="option-group">
-                <label className="option-title">온도</label>
-                <div className="option-items">
-                  {optionOptions.temp.map(t => (
-                    <div key={t} onClick={() => setCurrentOptions(prev => ({ ...prev, temp: t, ice: t === 'HOT' ? '없음' : '얼음 중간' }))} className={`option-item ${currentOptions.temp === t ? 'active' : ''}`}>{t}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {currentOptions.temp === 'ICE' && activeDetailItem.type !== 'HOT' && (
-              <div className="option-group">
-                <label className="option-title">얼음량</label>
-                <div className="option-items">
-                  {optionOptions.ice.map(i => (
-                    <div key={i} onClick={() => setCurrentOptions(prev => ({ ...prev, ice: i }))} className={`option-item ${currentOptions.ice === i ? 'active' : ''}`}>{i}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {(activeDetailItem.id >= 13 && activeDetailItem.id <= 16) || (activeDetailItem.id >= 25 && activeDetailItem.id <= 28) ? (
-              <div className="option-group">
-                <label className="option-title">당도</label>
-                <div className="option-items">
-                  {optionOptions.sweetness.map(s => (
-                    <div key={s} onClick={() => setCurrentOptions(prev => ({ ...prev, sweetness: s }))} className={`option-item ${currentOptions.sweetness === s ? 'active' : ''}`}>{s}</div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {(activeDetailItem.type === 'BOTH' || activeDetailItem.type === 'ICE') && (
-              <div className="option-group">
-                <label className="option-title">펄 추가</label>
-                <div className="option-items">
-                  {optionOptions.pearl.map(p => (
-                    <div key={p} onClick={() => setCurrentOptions(prev => ({ ...prev, pearl: p }))} className={`option-item ${currentOptions.pearl === p ? 'active' : ''}`}>{p}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        )}
-
-        <div className="option-group">
-          <label className="option-title">샷 추가</label>
-          <div className="option-items">
-            {optionOptions.shot.map(s => (
-              <div key={s} onClick={() => setCurrentOptions(prev => ({ ...prev, shot: s }))} className={`option-item ${currentOptions.shot === s ? 'active' : ''}`}>{s}</div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: '10px', marginTop: '30px' }}>
-          <button className="close-btn" style={{ flex: 1, margin: 0, padding: '15px', color: '#666', fontSize: '1.2rem', borderRadius: '10px' }} onClick={handleCancelModal}>취소</button>
-          <button className="pay-btn" style={{ flex: 1, margin: 0, padding: '15px', fontSize: '1.2rem', borderRadius: '10px' }} onClick={addFinalItemToCart}>담기</button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-if (isSplashScreen) {
-  return (
-    <div className="splash-screen" onClick={() => setIsSplashScreen(false)}>
-      <h1 className="splash-title">MALMAL CAFE</h1>
-      <p className="splash-subtitle">Premium AI Barista</p>
-      <div className="touch-to-start">화면을 터치하여 주문을 시작하세요</div>
-      <p style={{ position: 'absolute', bottom: '40px', opacity: 0.8, fontSize: '1.3rem', fontWeight: 600, letterSpacing: '1px' }}></p>
-    </div>
-  );
-}
-
-return (
-  // ⭐️ [추가한 부분] a11y-mode (돋보기 모드) 클래스 오버라이딩 적용
-  <div className={`app-container ${isA11yMode ? 'a11y-mode' : ''}`}>
-    <nav className="sidebar">
-      <div className="logo-area">
-        <span style={{ fontSize: '2.5rem', margin: '5px 0' }}>☕</span>
-        <div style={{ fontSize: '1.2rem', fontWeight: '900' }}>말말카페</div>
-      </div>
-
-      <div className="sidebar-bottom-area">
-        {/* ⭐️ [추가한 부분] 돋보기/접근성 모드 토글 버튼 (사이드바 하단으로 이동) */}
-        <button onClick={() => setIsA11yMode(!isA11yMode)} className="a11y-sidebar-btn" style={{ background: isA11yMode ? '#222' : '#FFEB3B', color: isA11yMode ? 'white' : '#000' }}>
-          {isA11yMode ? '🔍 원래 화면' : '🔍 큰 글씨'}
-        </button>
-
-        {lastRecognizedText && (
-          <div className="voice-debug-area" style={{ marginTop: 0 }}>
-            🎤 인식된 문장<br /><span style={{ color: 'white', fontWeight: 800 }}>"{lastRecognizedText}"</span>
-          </div>
-        )}
-      </div>
-    </nav>
-
-    <main className="main-container">
-      <nav className="category-bar">
-        <div className={`category-item ai-btn ${activeCategory === 'ai_recommend' ? 'active' : ''}`} onClick={() => handleCategoryClick('ai_recommend')}>✨ AI 추천</div>
-        <div className={`category-item ${activeCategory === 'set' ? 'active' : ''}`} onClick={() => handleCategoryClick('set')}>세트메뉴</div>
-        <div className={`category-item ${activeCategory === 'signature' ? 'active' : ''}`} onClick={() => handleCategoryClick('signature')}>시그니처</div>
-        <div className={`category-item ${activeCategory === 'caffeine' ? 'active' : ''}`} onClick={() => handleCategoryClick('caffeine')}>커피</div>
-        <div className={`category-item ${activeCategory === 'noncoffee' ? 'active' : ''}`} onClick={() => handleCategoryClick('noncoffee')}>논커피</div>
-        <div className={`category-item ${activeCategory === 'ade' ? 'active' : ''}`} onClick={() => handleCategoryClick('ade')}>에이드</div>
-        <div className={`category-item ${activeCategory === 'tea' ? 'active' : ''}`} onClick={() => handleCategoryClick('tea')}>차(Tea)</div>
-        <div className={`category-item ${activeCategory === 'dessert' ? 'active' : ''}`} onClick={() => handleCategoryClick('dessert')}>디저트</div>
       </nav>
 
-      <div className="menu-area">
-        {activeCategory === 'ai_recommend' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div style={{ background: 'var(--mm-white-glass)', backdropFilter: 'blur(15px)', WebkitBackdropFilter: 'blur(15px)', padding: '25px', borderRadius: '20px', marginBottom: '30px', borderLeft: '6px solid #673AB7', boxShadow: '0 10px 30px rgba(0,0,0,0.05)', border: '1px solid rgba(255,255,255,0.6)' }}>
-              <h2 style={{ margin: '0 0 10px 0', color: '#673AB7' }}>🤖 AI 말말이에게 물어보세요!</h2>
-              <p style={{ margin: '0', color: '#555', lineHeight: '1.6', fontSize: '1.1rem', fontWeight: 'bold' }}>
-                {isAiThinking ? (
-                  <span style={{ fontWeight: 'bold', color: '#D32F2F' }}>🤔 고객님의 취향을 분석하고 있습니다... 잠시만요!</span>
-                ) : (aiMessage)}
-              </p>
+      <main className="main-container">
+        <nav className="category-bar">
+          <div className={`category-item ai-btn ${activeCategory === 'ai_recommend' ? 'active' : ''}`} onClick={() => handleCategoryClick('ai_recommend')}>✨ AI 추천</div>
+          <div className={`category-item ${activeCategory === 'set' ? 'active' : ''}`} onClick={() => handleCategoryClick('set')}>세트메뉴</div>
+          <div className={`category-item ${activeCategory === 'signature' ? 'active' : ''}`} onClick={() => handleCategoryClick('signature')}>시그니처</div>
+          <div className={`category-item ${activeCategory === 'caffeine' ? 'active' : ''}`} onClick={() => handleCategoryClick('caffeine')}>커피</div>
+          <div className={`category-item ${activeCategory === 'noncoffee' ? 'active' : ''}`} onClick={() => handleCategoryClick('noncoffee')}>논커피</div>
+          <div className={`category-item ${activeCategory === 'ade' ? 'active' : ''}`} onClick={() => handleCategoryClick('ade')}>에이드</div>
+          <div className={`category-item ${activeCategory === 'tea' ? 'active' : ''}`} onClick={() => handleCategoryClick('tea')}>차(Tea)</div>
+          <div className={`category-item ${activeCategory === 'dessert' ? 'active' : ''}`} onClick={() => handleCategoryClick('dessert')}>디저트</div>
+        </nav>
+
+        <div className="menu-area">
+          {activeCategory === 'ai_recommend' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              <div style={{ background: 'var(--mm-white-glass)', backdropFilter: 'blur(15px)', WebkitBackdropFilter: 'blur(15px)', padding: '25px', borderRadius: '20px', marginBottom: '30px', borderLeft: '6px solid #673AB7', boxShadow: '0 10px 30px rgba(0,0,0,0.05)', border: '1px solid rgba(255,255,255,0.6)' }}>
+                <h2 style={{ margin: '0 0 10px 0', color: '#673AB7' }}>🤖 AI 말말이에게 물어보세요!</h2>
+                <p style={{ margin: '0', color: '#555', lineHeight: '1.6', fontSize: '1.1rem', fontWeight: 'bold' }}>
+                  {isAiThinking ? (
+                    <span style={{ fontWeight: 'bold', color: '#D32F2F' }}>🤔 고객님의 취향을 분석하고 있습니다... 잠시만요!</span>
+                  ) : (aiMessage)}
+                </p>
+              </div>
+              {aiRecommendations.length > 0 && !isAiThinking && (
+                <>
+                  <h3 style={{ marginTop: '0', color: 'var(--mm-dark)' }}>추천 메뉴</h3>
+                  <div className="menu-grid">
+                    {aiRecommendations.map((item) => (
+                      <div key={item.id} className="menu-card" onClick={() => handleMenuClick(item)} style={{ borderColor: '#673AB7' }}>
+                        {item.img ? (
+                          <img src={item.img} alt={item.name} style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '10px', marginBottom: '15px' }} />
+                        ) : (
+                          <div className="menu-img-placeholder">이미지 준비중</div>
+                        )}
+                        <div className="menu-name">{item.name}</div>
+                        <div className="menu-price">{item.price.toLocaleString()}원</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
-            {aiRecommendations.length > 0 && !isAiThinking && (
-              <>
-                <h3 style={{ marginTop: '0', color: 'var(--mm-dark)' }}>추천 메뉴</h3>
-                <div className="menu-grid">
-                  {aiRecommendations.map((item) => (
-                    <div key={item.id} className="menu-card" onClick={() => handleMenuClick(item)} style={{ borderColor: '#673AB7' }}>
-                      {item.img ? (
-                        <img src={item.img} alt={item.name} style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '10px', marginBottom: '15px' }} />
-                      ) : (
-                        <div className="menu-img-placeholder">이미지 준비중</div>
-                      )}
-                      <div className="menu-name">{item.name}</div>
-                      <div className="menu-price">{item.price.toLocaleString()}원</div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
+          ) : (
+            <>
+              <h2 className="category-title">
+                {activeCategory === 'set' ? 'Set Menu' : activeCategory === 'signature' ? 'Signature' : activeCategory === 'caffeine' ? 'Coffee' : activeCategory === 'noncoffee' ? 'Non-Coffee' : activeCategory === 'ade' ? 'Ade & Juice' : activeCategory === 'tea' ? 'Tea' : 'Dessert'}
+              </h2>
+              <div className="menu-grid">
+                {menuData[activeCategory].map((item) => (
+                  <div key={item.id} className="menu-card" onClick={() => handleMenuClick(item)}>
+                    {item.img ? (
+                      <img src={item.img} alt={item.name} style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '10px', marginBottom: '15px' }} />
+                    ) : (
+                      <div className="menu-img-placeholder">이미지 준비중</div>
+                    )}
+                    <div className="menu-name">{item.name}</div>
+                    <div className="menu-price">{item.price.toLocaleString()}원</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="main-bottom-area">
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '15px' }}>
+            <span className="total-text">총 결제 금액</span>
+            <span className="total-price">{totalAmount.toLocaleString()}원</span>
           </div>
-        ) : (
-          <>
-            <h2 className="category-title">
-              {activeCategory === 'set' ? 'Set Menu' : activeCategory === 'signature' ? 'Signature' : activeCategory === 'caffeine' ? 'Coffee' : activeCategory === 'noncoffee' ? 'Non-Coffee' : activeCategory === 'ade' ? 'Ade & Juice' : activeCategory === 'tea' ? 'Tea' : 'Dessert'}
-            </h2>
-            <div className="menu-grid">
-              {menuData[activeCategory].map((item) => (
-                <div key={item.id} className="menu-card" onClick={() => handleMenuClick(item)}>
-                  {item.img ? (
-                    <img src={item.img} alt={item.name} style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '10px', marginBottom: '15px' }} />
-                  ) : (
-                    <div className="menu-img-placeholder">이미지 준비중</div>
-                  )}
-                  <div className="menu-name">{item.name}</div>
-                  <div className="menu-price">{item.price.toLocaleString()}원</div>
+          <button className="pay-btn" onClick={startPaymentFlow}>결제하기</button>
+        </div>
+      </main>
+
+      <aside className={`order-container ${isCartOpen ? 'open' : ''}`}>
+        <div className="cart-header" onClick={() => window.innerWidth <= 1024 && setIsCartOpen(!isCartOpen)}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
+            <h3 className="cart-title" style={{ margin: 0 }}>내 주문 내역 ({cart.length})</h3>
+            <span className="cart-toggle-icon" style={{ display: window.innerWidth <= 1024 ? 'inline-block' : 'none', fontSize: '1.2rem', color: '#888', transform: isCartOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }}>▲</span>
+          </div>
+          <button onClick={(e) => { e.stopPropagation(); startVoiceRecognition(); }} className={`mic-btn ${isListening ? 'listening' : ''}`} title="음성으로 주문하기">🎤</button>
+        </div>
+
+        {isListening && <div style={{ textAlign: 'center', color: '#D32F2F', padding: '10px', fontWeight: 'bold', background: '#ffebee' }}>음성을 듣고 있습니다... (최대 15초)</div>}
+
+        <div className="cart-list">
+          {cart.length === 0 ? (
+            <div style={{ textAlign: 'center', color: '#999', marginTop: window.innerWidth <= 768 ? '10px' : '100px' }}>선택된 메뉴가 없습니다.</div>
+          ) : (
+            cartWithUniqueKey.map((item) => {
+              const isSwiping = swipeData.id === item.uniqueKey;
+              const tx = isSwiping && swipeData.currentX < 0 ? Math.max(swipeData.currentX, -100) : 0;
+              return (
+                /* ⭐️ [추가한 부분] 모바일 스와이프 제스처 삭제 처리를 위한 Wrapper */
+                <div key={item.uniqueKey} className="cart-item-wrapper">
+                  <div className="swipe-delete-bg">
+                    🗑️ 삭제
+                  </div>
+                  <div
+                    className="cart-item"
+                    onTouchStart={(e) => handleTouchStart(e, item.uniqueKey)}
+                    onTouchMove={(e) => handleTouchMove(e, item.uniqueKey)}
+                    onTouchEnd={(e) => handleTouchEnd(e, item.uniqueKey)}
+                    style={{
+                      transform: `translateX(${tx}px)`,
+                      transition: isSwiping ? 'none' : 'transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+                      margin: 0
+                    }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div className="cart-item-name">{item.name}</div>
+                      <div style={{ fontSize: '0.85rem', color: '#888' }}>
+                        {[item.options.temp, item.options.ice, item.options.sweetness, item.options.pearl, item.options.shot].filter(o => o && o !== "없음").join(', ')}
+                      </div>
+                      <div className="cart-item-price">{(item.price * item.count).toLocaleString()}원</div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div className="cart-controls">
+                        <button onClick={() => changeCount(item.uniqueKey, -1)}>-</button>
+                        <span>{item.count}</span>
+                        <button onClick={() => changeCount(item.uniqueKey, 1)}>+</button>
+                      </div>
+                      <button className="delete-btn" onClick={() => removeItemCompletely(item.uniqueKey)}>✖</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div className="mobile-pay-area">
+          <div>
+            <div style={{ fontSize: '1.1rem', color: '#666', fontWeight: 'bold' }}>총 결제 금액</div>
+            <div style={{ fontSize: '1.7rem', fontWeight: '900', color: 'var(--mm-dark)', fontFamily: 'var(--font-numeric)' }}>{totalAmount.toLocaleString()}원</div>
+          </div>
+          <button className="pay-btn" onClick={startPaymentFlow}>결제</button>
+        </div>
+      </aside>
+
+      {/* 내부로 병합된 상세 옵션 모달 */}
+      {activeModal === 'DETAIL' && renderItemDetailModal()}
+
+      {activeModal === 'PAYMENT' && (
+        <div className="modal">
+          <div className="receipt" style={{ width: '450px' }}>
+            <h2>결제 및 수령 방식</h2>
+
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '25px', marginTop: '20px' }}>
+              <button
+                className={`option-item ${orderType === '매장' ? 'active' : ''}`}
+                style={{ flex: 1, padding: '15px', fontSize: '1.2rem', textAlign: 'center', margin: 0 }}
+                onClick={() => setOrderType('매장')}
+              >🏬 매장</button>
+              <button
+                className={`option-item ${orderType === '포장' ? 'active' : ''}`}
+                style={{ flex: 1, padding: '15px', fontSize: '1.2rem', textAlign: 'center', margin: 0 }}
+                onClick={() => setOrderType('포장')}
+              >🛍️ 포장</button>
+            </div>
+
+            <p style={{ textAlign: 'center', margin: '15px 0', color: '#888' }}>방식을 터치하시거나 말씀해 주세요.<br />(예: "포장하고 카드로 결제할게")</p>
+
+            <div style={{ display: 'flex', justifyContent: 'center', margin: '20px 0' }}>
+              <button onClick={startVoiceRecognition} className={`mic-btn ${isListening ? 'listening' : ''}`} title="현금 또는 카드라고 말씀해주세요">🎤</button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '15px', marginTop: '20px' }}>
+              <button className="pay-btn" style={{ flex: 1, padding: '15px', borderRadius: '10px', background: '#3F51B5' }} onClick={() => handlePaymentSelection("CASH")}>현금 결제</button>
+              <button className="pay-btn" style={{ flex: 1, padding: '15px', borderRadius: '10px' }} onClick={() => handlePaymentSelection("CARD")}>신용카드</button>
+            </div>
+            <button className="close-btn" style={{ margin: '20px 0 0 0', fontSize: '1.1rem' }} onClick={() => setActiveModal('MAIN')}>닫기</button>
+          </div>
+        </div>
+      )}
+
+      {activeModal === 'PROCESSING' && (
+        <div className="modal">
+          <div className="receipt" style={{ width: '300px', textAlign: 'center' }}>
+            <span style={{ fontSize: '3rem', marginBottom: '15px', display: 'block' }}>⏳</span>
+            <h2>결제 진행 중</h2>
+            <p style={{ margin: '15px 0', fontSize: '1.1rem' }}>{lastProcessingPaymentMethod} 결제를 처리하고 있습니다.</p>
+            <p style={{ color: '#999', fontSize: '0.9rem' }}>잠시만 기다려 주세요 (5초)</p>
+          </div>
+        </div>
+      )}
+
+      {activeModal === 'RECEIPT' && (
+        <div className="modal">
+          <div className="receipt">
+            <h2>RECEIPT</h2>
+            <p style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--mm-primary)', fontSize: '1.2rem', margin: '5px 0' }}>[{orderType}]</p>
+            <p style={{ color: '#666', fontSize: '0.9rem', marginTop: '15px' }}>매장명: 말말카페 (MalMal Cafe)</p>
+            <p style={{ color: '#666', fontSize: '0.9rem' }}>일시: {new Date().toLocaleString()}</p>
+            <div className="receipt-list">
+              {cartWithUniqueKey.map((item) => (
+                <div key={item.uniqueKey} style={{ fontSize: '0.85rem', margin: '8px 0', borderBottom: '1px solid #eee', paddingBottom: '8px' }}>
+                  <p style={{ display: 'flex', justifyContent: 'space-between', margin: '0', fontWeight: 'bold' }}>
+                    <span>{item.name} <span style={{ color: '#888' }}>x{item.count}</span></span>
+                    <span>{(item.price * item.count).toLocaleString()}</span>
+                  </p>
+                  <p style={{ color: '#888', margin: '3px 0 0 0', fontSize: '0.75rem' }}>
+                    {[item.options.temp, item.options.ice, item.options.sweetness, item.options.pearl, item.options.shot].filter(o => o && o !== "없음").join(', ')}
+                  </p>
                 </div>
               ))}
             </div>
-          </>
-        )}
-      </div>
-
-      <div className="main-bottom-area">
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '15px' }}>
-          <span className="total-text">총 결제 금액</span>
-          <span className="total-price">{totalAmount.toLocaleString()}원</span>
-        </div>
-        <button className="pay-btn" onClick={startPaymentFlow}>결제하기</button>
-      </div>
-    </main>
-
-    <aside className={`order-container ${isCartOpen ? 'open' : ''}`}>
-      <div className="cart-header" onClick={() => window.innerWidth <= 1024 && setIsCartOpen(!isCartOpen)}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1 }}>
-          <h3 className="cart-title" style={{ margin: 0 }}>내 주문 내역 ({cart.length})</h3>
-          <span className="cart-toggle-icon" style={{ display: window.innerWidth <= 1024 ? 'inline-block' : 'none', fontSize: '1.2rem', color: '#888', transform: isCartOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }}>▲</span>
-        </div>
-        <button onClick={(e) => { e.stopPropagation(); startVoiceRecognition(); }} className={`mic-btn ${isListening ? 'listening' : ''}`} title="음성으로 주문하기">🎤</button>
-      </div>
-
-      {isListening && <div style={{ textAlign: 'center', color: '#D32F2F', padding: '10px', fontWeight: 'bold', background: '#ffebee' }}>음성을 듣고 있습니다... (최대 15초)</div>}
-
-      <div className="cart-list">
-        {cart.length === 0 ? (
-          <div style={{ textAlign: 'center', color: '#999', marginTop: window.innerWidth <= 768 ? '10px' : '100px' }}>선택된 메뉴가 없습니다.</div>
-        ) : (
-          cartWithUniqueKey.map((item) => {
-            const isSwiping = swipeData.id === item.uniqueKey;
-            const tx = isSwiping && swipeData.currentX < 0 ? Math.max(swipeData.currentX, -100) : 0;
-            return (
-              /* ⭐️ [추가한 부분] 모바일 스와이프 제스처 삭제 처리를 위한 Wrapper */
-              <div key={item.uniqueKey} className="cart-item-wrapper">
-                <div className="swipe-delete-bg">
-                  🗑️ 삭제
-                </div>
-                <div
-                  className="cart-item"
-                  onTouchStart={(e) => handleTouchStart(e, item.uniqueKey)}
-                  onTouchMove={(e) => handleTouchMove(e, item.uniqueKey)}
-                  onTouchEnd={(e) => handleTouchEnd(e, item.uniqueKey)}
-                  style={{
-                    transform: `translateX(${tx}px)`,
-                    transition: isSwiping ? 'none' : 'transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                    margin: 0
-                  }}
-                >
-                  <div style={{ flex: 1 }}>
-                    <div className="cart-item-name">{item.name}</div>
-                    <div style={{ fontSize: '0.85rem', color: '#888' }}>
-                      {[item.options.temp, item.options.ice, item.options.sweetness, item.options.pearl, item.options.shot].filter(o => o && o !== "없음").join(', ')}
-                    </div>
-                    <div className="cart-item-price">{(item.price * item.count).toLocaleString()}원</div>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div className="cart-controls">
-                      <button onClick={() => changeCount(item.uniqueKey, -1)}>-</button>
-                      <span>{item.count}</span>
-                      <button onClick={() => changeCount(item.uniqueKey, 1)}>+</button>
-                    </div>
-                    <button className="delete-btn" onClick={() => removeItemCompletely(item.uniqueKey)}>✖</button>
-                  </div>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      <div className="mobile-pay-area">
-        <div>
-          <div style={{ fontSize: '1.1rem', color: '#666', fontWeight: 'bold' }}>총 결제 금액</div>
-          <div style={{ fontSize: '1.7rem', fontWeight: '900', color: 'var(--mm-dark)', fontFamily: 'var(--font-numeric)' }}>{totalAmount.toLocaleString()}원</div>
-        </div>
-        <button className="pay-btn" onClick={startPaymentFlow}>결제</button>
-      </div>
-    </aside>
-
-    {/* 내부로 병합된 상세 옵션 모달 */}
-    {activeModal === 'DETAIL' && renderItemDetailModal()}
-
-    {activeModal === 'PAYMENT' && (
-      <div className="modal">
-        <div className="receipt" style={{ width: '450px' }}>
-          <h2>결제 및 수령 방식</h2>
-
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '25px', marginTop: '20px' }}>
-            <button
-              className={`option-item ${orderType === '매장' ? 'active' : ''}`}
-              style={{ flex: 1, padding: '15px', fontSize: '1.2rem', textAlign: 'center', margin: 0 }}
-              onClick={() => setOrderType('매장')}
-            >🏬 매장</button>
-            <button
-              className={`option-item ${orderType === '포장' ? 'active' : ''}`}
-              style={{ flex: 1, padding: '15px', fontSize: '1.2rem', textAlign: 'center', margin: 0 }}
-              onClick={() => setOrderType('포장')}
-            >🛍️ 포장</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '900', fontSize: '1.4rem', color: 'var(--mm-dark)' }}>
+              <span>TOTAL</span>
+              <span>{totalAmount.toLocaleString()}원</span>
+            </div>
+            <p style={{ textAlign: 'center', marginTop: '30px', fontWeight: 'bold', color: 'var(--mm-primary)' }}>이용해 주셔서 감사합니다.</p>
+            <button className="close-btn" onClick={closeReceipt}>확인 (처음으로)</button>
           </div>
-
-          <p style={{ textAlign: 'center', margin: '15px 0', color: '#888' }}>방식을 터치하시거나 말씀해 주세요.<br />(예: "포장하고 카드로 결제할게")</p>
-
-          <div style={{ display: 'flex', justifyContent: 'center', margin: '20px 0' }}>
-            <button onClick={startVoiceRecognition} className={`mic-btn ${isListening ? 'listening' : ''}`} title="현금 또는 카드라고 말씀해주세요">🎤</button>
-          </div>
-
-          <div style={{ display: 'flex', gap: '15px', marginTop: '20px' }}>
-            <button className="pay-btn" style={{ flex: 1, padding: '15px', borderRadius: '10px', background: '#3F51B5' }} onClick={() => handlePaymentSelection("CASH")}>현금 결제</button>
-            <button className="pay-btn" style={{ flex: 1, padding: '15px', borderRadius: '10px' }} onClick={() => handlePaymentSelection("CARD")}>신용카드</button>
-          </div>
-          <button className="close-btn" style={{ margin: '20px 0 0 0', fontSize: '1.1rem' }} onClick={() => setActiveModal('MAIN')}>닫기</button>
         </div>
-      </div>
-    )}
+      )}
 
-    {activeModal === 'PROCESSING' && (
-      <div className="modal">
-        <div className="receipt" style={{ width: '300px', textAlign: 'center' }}>
-          <span style={{ fontSize: '3rem', marginBottom: '15px', display: 'block' }}>⏳</span>
-          <h2>결제 진행 중</h2>
-          <p style={{ margin: '15px 0', fontSize: '1.1rem' }}>{lastProcessingPaymentMethod} 결제를 처리하고 있습니다.</p>
-          <p style={{ color: '#999', fontSize: '0.9rem' }}>잠시만 기다려 주세요 (5초)</p>
-        </div>
-      </div>
-    )}
-
-    {activeModal === 'RECEIPT' && (
-      <div className="modal">
-        <div className="receipt">
-          <h2>RECEIPT</h2>
-          <p style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--mm-primary)', fontSize: '1.2rem', margin: '5px 0' }}>[{orderType}]</p>
-          <p style={{ color: '#666', fontSize: '0.9rem', marginTop: '15px' }}>매장명: 말말카페 (MalMal Cafe)</p>
-          <p style={{ color: '#666', fontSize: '0.9rem' }}>일시: {new Date().toLocaleString()}</p>
-          <div className="receipt-list">
-            {cartWithUniqueKey.map((item) => (
-              <div key={item.uniqueKey} style={{ fontSize: '0.85rem', margin: '8px 0', borderBottom: '1px solid #eee', paddingBottom: '8px' }}>
-                <p style={{ display: 'flex', justifyContent: 'space-between', margin: '0', fontWeight: 'bold' }}>
-                  <span>{item.name} <span style={{ color: '#888' }}>x{item.count}</span></span>
-                  <span>{(item.price * item.count).toLocaleString()}</span>
-                </p>
-                <p style={{ color: '#888', margin: '3px 0 0 0', fontSize: '0.75rem' }}>
-                  {[item.options.temp, item.options.ice, item.options.sweetness, item.options.pearl, item.options.shot].filter(o => o && o !== "없음").join(', ')}
-                </p>
-              </div>
-            ))}
+      {/* [추가한 부분] 화려한 AI 음성 인식 시각화 (Global Overlay) */}
+      {isListening && (
+        <div className="voice-visualizer-overlay">
+          <div className="visualizer-container">
+            <div className="orb"></div>
+            <div className="wave-bar"></div>
+            <div className="wave-bar"></div>
+            <div className="wave-bar"></div>
+            <div className="wave-bar"></div>
+            <div className="wave-bar"></div>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '900', fontSize: '1.4rem', color: 'var(--mm-dark)' }}>
-            <span>TOTAL</span>
-            <span>{totalAmount.toLocaleString()}원</span>
-          </div>
-          <p style={{ textAlign: 'center', marginTop: '30px', fontWeight: 'bold', color: 'var(--mm-primary)' }}>이용해 주셔서 감사합니다.</p>
-          <button className="close-btn" onClick={closeReceipt}>확인 (처음으로)</button>
+          <div className="listening-text">말말이가 듣고 있습니다...</div>
         </div>
-      </div>
-    )}
-
-    {/* ⭐️ [추가한 부분] 화려한 AI 음성 인식 시각화 (Global Overlay) */}
-    {isListening && (
-      <div className="voice-visualizer-overlay">
-        <div className="visualizer-container">
-          <div className="orb"></div>
-          <div className="wave-bar"></div>
-          <div className="wave-bar"></div>
-          <div className="wave-bar"></div>
-          <div className="wave-bar"></div>
-          <div className="wave-bar"></div>
-        </div>
-        <div className="listening-text">말말이가 듣고 있습니다...</div>
-      </div>
-    )}
-  </div>
-);
+      )}
+    </div>
+  );
 }
 
 export default App;
